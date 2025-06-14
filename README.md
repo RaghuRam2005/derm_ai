@@ -26,7 +26,7 @@ A complete AI-powered skin disease detection system using Streamlit frontend, Fa
 
 ### 3. Installation
 
-Clone or download the project files and open terminal in the project folder
+Clone or download the project files and open terminal in the project folder (create a virtual environment (optional))
 
 ```bash
 # Install dependencies
