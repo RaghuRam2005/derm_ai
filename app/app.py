@@ -1,7 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import google.generativeai as genai
 import base64
 import io
 from PIL import Image
@@ -11,6 +10,8 @@ import json
 import re
 from dotenv import load_dotenv
 from model.model import ModelHandler
+from functools import lru_cache
+import requests
 
 # Initialize FastAPI app
 app = FastAPI(title="Skin Disease Detection API", version="1.0.0")
@@ -24,18 +25,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Configure Gemini API
-# Set your API key as environment variable: GEMINI_API_KEY
 load_dotenv()
-GEMINI_API_KEY = os.getenv("GEMINI_API")
-if not GEMINI_API_KEY:
-    raise ValueError("Please set GEMINI_API_KEY environment variable")
-
-genai.configure(api_key=GEMINI_API_KEY)
-
-# Initialize Gemini model
-model = genai.GenerativeModel('gemini-1.5-flash')
-image_model = ModelHandler()
+# Configure deepseek API keys
+# Set your API key as environment variable: DEEPSEEK_KEY
+OPENROUTER_API, OPENROUTER_URL = os.getenv("DEEPSEEK_API"), os.getenv("DEEPSEEK_URL")
+IMAGE_MODEL = ModelHandler()
 
 # Pydantic models
 class ImageAnalysisRequest(BaseModel):
@@ -68,47 +62,200 @@ def clean_text(text: str) -> str:
     text = re.sub(r'\s+', ' ', text)                # Replace multiple spaces with single space
     return text.strip()
 
-def parse_gemini_response(response_text: str, disease_name: str) -> dict:
-    """Parse Gemini response and extract 'description' and 'treatment' from raw text."""
-    try:
-        # If response is JSON formatted, parse it directly
-        if response_text.strip().startswith('{'):
-            return json.loads(response_text)
-    except Exception:
-        pass
-
-    response_text = clean_text(response_text)
-    
-    result = {
-        'description': '',
-        'treatment': []
+def parse_sections(content):
+    """Parse the content into structured sections"""
+    sections = {
+        "description": "",
+        "Symptoms": [],
+        "treatments": [],
+        "medical_care": []
     }
-
-    # Extract under headings
-    desc_match = re.search(r'Description of .*?:\s*(.*?)(?:Treatments for|$)', response_text, re.IGNORECASE | re.DOTALL)
-    treatment_match = re.search(r'Treatments for .*?:\s*(.*)', response_text, re.IGNORECASE | re.DOTALL)
-
-    if desc_match:
-        result['description'] = desc_match.group(1).strip()
-
-    if treatment_match:
-        # Split by newlines or periods if necessary, avoiding blank entries
-        raw_treatments = treatment_match.group(1).strip()
-        treatments = re.split(r'\n|(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?)\s', raw_treatments)
-        result['treatment'] = [t.strip() for t in treatments if t.strip()]
     
-    # Fallbacks
-    if not result['description']:
-        result['description'] = f"Visual investigation suggests the condition is likely {disease_name}. Further description couldn't be determined."
+    current_section = None
+    lines = content.split('\n')
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+            
+        # Check for section headers (case insensitive)
+        line_lower = line.lower()
+        if "description:" in line_lower:
+            current_section = "description"
+            # If there's content after the colon, add it
+            content_after_colon = line.split(':', 1)[1].strip() if ':' in line else ""
+            if content_after_colon:
+                sections["description"] = content_after_colon
+            continue
+        elif "symptoms:" in line_lower:
+            current_section = "Symptoms"
+            continue
+        elif "treatment:" in line_lower:
+            current_section = "treatments"
+            continue
+        elif "when to seek medical care:" in line_lower or "medical care:" in line_lower:
+            current_section = "medical_care"
+            continue
+        
+        # Skip lines that are just special characters or formatting
+        if re.match(r'^[\s`~{}[\]\\*-•]+$', line):
+            continue
+            
+        # Clean the line
+        cleaned_line = clean_text(line)
+        if not cleaned_line:
+            continue
+            
+        # Add content to appropriate section
+        if current_section:
+            if current_section == "description":
+                if sections["description"]:
+                    sections["description"] += " "
+                sections["description"] += cleaned_line
+            else:
+                # Only add non-empty lines
+                if cleaned_line and len(cleaned_line) > 2:  # Avoid single characters
+                    sections[current_section].append(cleaned_line)
+    
+    # Clean up the sections
+    sections["description"] = sections["description"].strip()
+    
+    # Remove duplicates and clean up lists
+    for key in ["Symptoms", "treatments", "medical_care"]:
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_items = []
+        for item in sections[key]:
+            item_clean = item.strip()
+            if item_clean and item_clean.lower() not in seen and len(item_clean) > 5:
+                seen.add(item_clean.lower())
+                unique_items.append(item_clean)
+        sections[key] = unique_items
+    
+    return sections
 
-    if not result['treatment']:
-        result['treatment'] = [
-            "Consult a dermatologist for proper diagnosis.",
-            "Keep the affected area clean and dry.",
-            "Avoid scratching or irritating the affected area."
-        ]
+@lru_cache(maxsize=100)
+def get_disease_info(disease_name):
+    """Get detailed information about a skin disease using DeepSeek"""
+    try:
+        prompt = f"""Provide comprehensive medical information about the skin condition "{disease_name}". Format your response exactly as follows:
 
-    return result
+Description:
+Provide a clear, detailed overview of the condition in 2-3 sentences. Include what causes it, what it looks like, and who it typically affects.
+
+Symptoms:
+List the main symptoms and signs of this condition. Each symptom should be on a separate line.
+
+Treatment:
+List the available treatment options, including both medical treatments and home care recommendations. Each treatment should be on a separate line.
+
+When to Seek Medical Care:
+List specific situations when someone should see a doctor for this condition. Each situation should be on a separate line.
+
+Please provide accurate, helpful medical information while being clear that this is for educational purposes only."""
+
+        headers = {
+            "Authorization": f"Bearer {OPENROUTER_API}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "http://localhost:8000",
+            "X-Title": "Skin Disease Detection System"
+        }
+
+        data = {
+            "model": "deepseek/deepseek-chat",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are a knowledgeable dermatology assistant. Provide clear, accurate medical information about skin conditions. Use the exact format requested with clear section headers. Keep information concise but comprehensive."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            "temperature": 0.3,
+            "max_tokens": 1000
+        }
+
+        print(f"Making API request to DeepSeek for disease: {disease_name}")
+        
+        if not OPENROUTER_URL:
+            raise Exception("openrouter URL was not set.")
+        response = requests.post(
+            OPENROUTER_URL,
+            headers=headers,
+            json=data,
+            timeout=30
+        )
+
+        print(f"API Response Status: {response.status_code}")
+        
+        if response.status_code == 200:
+            result = response.json()
+            content = result['choices'][0]['message']['content']
+            
+            print(f"Raw API Response: {content[:200]}...")
+            
+            # Parse the content into structured sections
+            sections = parse_sections(content)
+            
+            print(f"Parsed sections: {sections}")
+            
+            # Ensure all sections have content - provide defaults if empty
+            if not sections["description"]:
+                sections["description"] = f"A skin condition that requires medical evaluation for proper diagnosis and treatment."
+            
+            if not sections["Symptoms"]:
+                sections["Symptoms"] = [
+                    "Visible changes in skin appearance",
+                    "May cause discomfort or irritation",
+                    "Consult a healthcare provider for accurate symptom assessment"
+                ]
+            
+            if not sections["treatments"]:
+                sections["treatments"] = [
+                    "Consult a dermatologist for proper diagnosis and treatment plan",
+                    "Keep the affected area clean and dry",
+                    "Avoid scratching or further irritating the area",
+                    "Follow healthcare provider's recommendations"
+                ]
+            
+            if not sections["medical_care"]:
+                sections["medical_care"] = [
+                    "If symptoms persist or worsen",
+                    "If you experience pain or severe discomfort",
+                    "If the condition spreads to other areas",
+                    "For proper diagnosis and treatment recommendations"
+                ]
+            
+            return sections
+            
+        else:
+            print(f"API Error: {response.status_code} - {response.text}")
+            raise Exception(f"API request failed with status {response.status_code}: {response.text}")
+
+    except Exception as e:
+        print(f"Error in get_disease_info: {str(e)}")
+        # Return default information if API fails
+        return {
+            "description": f"A skin condition identified as {disease_name}. Please consult a healthcare professional for proper diagnosis and treatment.",
+            "Symptoms": [
+                "Visible changes in skin appearance",
+                "May cause discomfort or irritation",
+                "Symptoms may vary between individuals"
+            ],
+            "treatments": [
+                "Consult a dermatologist for proper diagnosis and treatment plan",
+                "Keep the affected area clean and dry",
+                "Avoid scratching or further irritating the area"
+            ],
+            "medical_care": [
+                "If symptoms persist or worsen",
+                "If you experience pain or severe discomfort",
+                "For proper diagnosis and treatment recommendations"
+            ]
+        }
 
 @app.get("/")
 async def root():
@@ -117,38 +264,43 @@ async def root():
 @app.post("/analyze", response_model=dict)
 async def analyze_skin_image(request: ImageAnalysisRequest):
     try:
+        print("Starting image analysis...")
+        
         # Convert base64 to image
         image = base64_to_image(request.image_data)
-        disease = image_model.predict(image)
+        print("Image converted successfully")
         
-        # Prepare detailed prompt for Gemini
-        prompt = f"""
-        Description of {disease['class']} (generate it in a small paragraph):
-        Treatments for {disease['class']} (generate a points with no numbering, only a space between each point):
-        generate answer under these two headings, do not change or modify them
-        """
+        # Get disease prediction from model
+        disease = IMAGE_MODEL.predict(image)
+        print(f"Disease prediction: {disease}")
         
-        # Generate response using Gemini
-        response = model.generate_content([prompt])
+        # Get detailed information using DeepSeek
+        print(f"Getting disease info for: {disease['class']}")
+        disease_info = get_disease_info(disease['class'])
         
-        if not response.text:
-            raise HTTPException(status_code=500, detail="No response from AI model")
+        # Prepare final response
+        response = {
+            "disease": disease['class'],
+            "confidence": disease['confidence'],
+            "description": disease_info["description"],
+            "Symptoms": disease_info["Symptoms"],
+            "treatments": disease_info["treatments"],
+            "medical_care": disease_info["medical_care"]
+        }
         
-        # Parse the response
-        parsed_result = parse_gemini_response(response.text, disease['class'])
-        parsed_result['disease'] = disease['class']
-        parsed_result['confidence'] = disease['confidence']
-
-        return parsed_result
-        
+        print(f"Final response: {response}")
+        return response
+    
     except ValueError as e:
+        print(f"ValueError: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        print(f"Exception: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "model": "gemini-1.5-flash"}
+    return {"status": "healthy", "model": "deepseek"}
 
 if __name__ == "__main__":
     import uvicorn

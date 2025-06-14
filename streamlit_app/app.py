@@ -120,20 +120,77 @@ def analyze_skin_image(image, user_id=None):
         }
         
         # Send to backend
-        response = requests.post(f"{BACKEND_URL}/analyze", json=payload, timeout=30)
+        st.info("Sending image to AI model for analysis...")
+        response = requests.post(f"{BACKEND_URL}/analyze", json=payload, timeout=60)
         
         if response.status_code == 200:
-            return response.json()
+            result = response.json()
+            st.success("Analysis completed successfully!")
+            return result
         else:
-            st.error(f"Backend error: {response.status_code}")
+            st.error(f"Backend error: {response.status_code} - {response.text}")
             return None
             
     except requests.exceptions.ConnectionError:
         st.error("Could not connect to backend. Make sure the backend server is running on port 8000.")
         return None
+    except requests.exceptions.Timeout:
+        st.error("Request timed out. The analysis is taking longer than expected.")
+        return None
     except Exception as e:
         st.error(f"Error analyzing image: {str(e)}")
         return None
+
+def display_analysis_results(result):
+    """Display analysis results in a formatted way"""
+    if not result:
+        st.error("No analysis results to display")
+        return
+    
+    # Display in a clean format
+    st.markdown("### 🎯 Detected Condition")
+    disease = result.get('disease', 'Unknown Condition')
+    st.write(f"**{disease}**")
+
+    st.markdown("### 📊 Confidence Level")
+    confidence = result.get('confidence', 0.0)
+    st.progress(confidence)
+    st.write(f"{confidence*100:.1f}%")
+    
+    st.markdown("### 📝 Description")
+    description = result.get('description', 'No description available')
+    if description and description.strip():
+        st.write(description)
+    else:
+        st.info("No description was provided for this condition.")
+    
+    st.markdown("### 🤒 Symptoms")
+    symptoms = result.get('Symptoms', [])
+    if symptoms and len(symptoms) > 0:
+        for i, symptom in enumerate(symptoms, 1):
+            if symptom and symptom.strip():
+                st.write(f"{i}. {symptom}")
+    else:
+        st.info("No specific symptoms were listed for this condition.")
+    
+    st.markdown("### 💊 Recommended Treatments")
+    treatments = result.get('treatments', [])
+    if treatments and len(treatments) > 0:
+        for i, treatment in enumerate(treatments, 1):
+            if treatment and treatment.strip():
+                st.write(f"{i}. {treatment}")
+    else:
+        st.info("No specific treatments were recommended.")
+
+    st.markdown("### 🩺 When to Consult a Doctor")
+    medical_care = result.get('medical_care', [])
+    if medical_care and len(medical_care) > 0:
+        for i, care_advice in enumerate(medical_care, 1):
+            if care_advice and care_advice.strip():
+                st.write(f"{i}. {care_advice}")
+    else:
+        st.info("No specific recommendations for when to consult a doctor were provided for this condition. " \
+                "If you have concerns or symptoms worsen, please consult a healthcare professional.")
 
 # Initialize database
 init_db()
@@ -219,26 +276,12 @@ if st.session_state.logged_in and st.session_state.get('show_history', False):
     
     if history:
         for i, (disease_name, analysis_json, confidence, timestamp) in enumerate(history):
-            with st.expander(f"{disease_name} - {timestamp} (Confidence: {confidence:.1f}%)"):
-                analysis = json.loads(analysis_json)
-                
-                # Display in a clean format
-                st.markdown("### 🎯 Detected Condition")
-                st.write(analysis.get('disease', 'Unknown'))
-                
-                st.markdown("### 📝 Description")
-                st.write(analysis.get('description', 'No description available'))
-                
-                st.markdown("### 💊 Recommended Treatments")
-                treatments = analysis.get('treatments', [])
-                if treatments:
-                    for i, treatment in enumerate(treatments, 1):
-                        st.write(f"{i}. {treatment}")
-                else:
-                    st.write("No treatments specified")
-                
-                st.markdown("### 📊 Confidence Level")
-                st.write(f"{confidence:.1f}%")
+            with st.expander(f"{disease_name} - {timestamp} (Confidence: {confidence*100:.1f}%)"):
+                try:
+                    analysis = json.loads(analysis_json)
+                    display_analysis_results(analysis)
+                except json.JSONDecodeError:
+                    st.error("Error loading analysis data")
     else:
         st.info("No analysis history found.")
 
@@ -267,47 +310,25 @@ else:
                     result = analyze_skin_image(image, st.session_state.user_id)
                     
                     if result:
-                        st.success("Analysis Complete!")
-                        
                         # Display results
-                        st.markdown("### 🎯 Detection Results")
-                        
-                        # Confidence score
-                        confidence = result.get('confidence', 0)
-                        st.metric("Confidence Level", f"{confidence*100:.1f}%")
-                        
-                        # Disease information
-                        if 'disease' in result and result['disease']:
-                            st.markdown("#### 🏥 Detected Condition")
-                            st.write(result['disease'])
-                        
-                        # Description
-                        if 'description' in result and result['description']:
-                            st.markdown("#### 📝 Description")
-                            st.write(result['description'])
-                        
-                        # Treatment recommendations
-                        if 'treatments' in result and result['treatments']:
-                            st.markdown("#### 💊 Recommended Treatments")
-                            treatments = result['treatments']
-                            if isinstance(treatments, list):
-                                for i, treatment in enumerate(treatments, 1):
-                                    st.write(f"{i}. {treatment}")
-                            else:
-                                st.write(treatments)
+                        display_analysis_results(result)
                         
                         # Disclaimer
-                        st.warning("⚠️ **Medical Disclaimer:** This is an AI-powered analysis for informational purposes only. Always consult with a qualified healthcare professional for proper medical diagnosis and treatment.")
+                        st.warning("⚠️ **Medical Disclaimer:** This is an AI-powered analysis for informational purposes only. " \
+                                 "Always consult with a qualified healthcare professional for proper medical diagnosis and treatment.")
                         
                         # Save to history if logged in
                         if st.session_state.logged_in:
-                            save_analysis(
-                                st.session_state.user_id,
-                                uploaded_file.name,
-                                result,
-                                confidence
-                            )
-                            st.info("✅ Analysis saved to your history!")
+                            try:
+                                save_analysis(
+                                    st.session_state.user_id,
+                                    uploaded_file.name,
+                                    result,
+                                    result.get('confidence', 0.0)
+                                )
+                                st.info("✅ Analysis saved to your history!")
+                            except Exception as e:
+                                st.warning(f"Could not save to history: {str(e)}")
 
 # Instructions
 with st.expander("📋 How to use this app"):
@@ -326,4 +347,4 @@ with st.expander("📋 How to use this app"):
     """)
 
 st.markdown("---")
-st.markdown("*Powered by Google Gemini AI - For educational purposes only*")
+st.markdown("*Powered by AI - For educational purposes only*")
