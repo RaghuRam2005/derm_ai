@@ -7,7 +7,6 @@ import io
 from datetime import datetime
 import sqlite3
 import hashlib
-import os
 
 # Configure page
 st.set_page_config(
@@ -16,15 +15,12 @@ st.set_page_config(
     layout="wide"
 )
 
-BASE_PATH = os.path.dirname(__file__)
-db_path = os.path.abspath(os.path.join(BASE_PATH, "..", "database", "db_path"))
-
 # Backend URL
 BACKEND_URL = "http://localhost:8000"
 
 # Database setup
 def init_db():
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect('skin_app.db')
     c = conn.cursor()
     
     # Users table
@@ -51,7 +47,7 @@ def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 def authenticate_user(username, password):
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect('skin_app.db')
     c = conn.cursor()
     c.execute("SELECT id, password_hash FROM users WHERE username = ?", (username,))
     result = c.fetchone()
@@ -63,7 +59,7 @@ def authenticate_user(username, password):
 
 def create_user(username, password):
     try:
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect('skin_app.db')
         c = conn.cursor()
         c.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)",
                  (username, hash_password(password)))
@@ -75,17 +71,21 @@ def create_user(username, password):
         return None
 
 def save_analysis(user_id, image_name, analysis_result, confidence):
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect('skin_app.db')
     c = conn.cursor()
+    
+    # Use disease name as the display name
+    disease_name = analysis_result.get('disease', 'Unknown Condition')
+    
     c.execute("""INSERT INTO analysis_history 
                  (user_id, image_name, analysis_result, confidence) 
                  VALUES (?, ?, ?, ?)""",
-             (user_id, image_name, json.dumps(analysis_result), confidence))
+             (user_id, disease_name, json.dumps(analysis_result), confidence))
     conn.commit()
     conn.close()
 
 def get_user_history(user_id):
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect('skin_app.db')
     c = conn.cursor()
     c.execute("""SELECT image_name, analysis_result, confidence, timestamp 
                  FROM analysis_history 
@@ -213,10 +213,27 @@ if st.session_state.logged_in and st.session_state.get('show_history', False):
     history = get_user_history(st.session_state.user_id)
     
     if history:
-        for i, (image_name, analysis_json, confidence, timestamp) in enumerate(history):
-            with st.expander(f"Analysis {i+1} - {timestamp} (Confidence: {confidence:.1f}%)"):
+        for i, (disease_name, analysis_json, confidence, timestamp) in enumerate(history):
+            with st.expander(f"{disease_name} - {timestamp} (Confidence: {confidence:.1f}%)"):
                 analysis = json.loads(analysis_json)
-                st.json(analysis)
+                
+                # Display in a clean format
+                st.markdown("### 🎯 Detected Condition")
+                st.write(analysis.get('disease', 'Unknown'))
+                
+                st.markdown("### 📝 Description")
+                st.write(analysis.get('description', 'No description available'))
+                
+                st.markdown("### 💊 Recommended Treatments")
+                treatments = analysis.get('treatments', [])
+                if treatments:
+                    for i, treatment in enumerate(treatments, 1):
+                        st.write(f"{i}. {treatment}")
+                else:
+                    st.write("No treatments specified")
+                
+                st.markdown("### 📊 Confidence Level")
+                st.write(f"{confidence:.1f}%")
     else:
         st.info("No analysis history found.")
 
@@ -255,22 +272,24 @@ else:
                         st.metric("Confidence Level", f"{confidence:.1f}%")
                         
                         # Disease information
-                        if 'disease' in result:
-                            st.markdown(f"**Detected Condition:** {result['disease']}")
+                        if 'disease' in result and result['disease']:
+                            st.markdown("#### 🏥 Detected Condition")
+                            st.write(result['disease'])
                         
                         # Description
-                        if 'description' in result:
-                            st.markdown("**Description:**")
+                        if 'description' in result and result['description']:
+                            st.markdown("#### 📝 Description")
                             st.write(result['description'])
                         
                         # Treatment recommendations
-                        if 'treatments' in result:
-                            st.markdown("**Recommended Treatments:**")
-                            if isinstance(result['treatments'], list):
-                                for treatment in result['treatments']:
-                                    st.write(f"• {treatment}")
+                        if 'treatments' in result and result['treatments']:
+                            st.markdown("#### 💊 Recommended Treatments")
+                            treatments = result['treatments']
+                            if isinstance(treatments, list):
+                                for i, treatment in enumerate(treatments, 1):
+                                    st.write(f"{i}. {treatment}")
                             else:
-                                st.write(result['treatments'])
+                                st.write(treatments)
                         
                         # Disclaimer
                         st.warning("⚠️ **Medical Disclaimer:** This is an AI-powered analysis for informational purposes only. Always consult with a qualified healthcare professional for proper medical diagnosis and treatment.")

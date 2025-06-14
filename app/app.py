@@ -26,7 +26,6 @@ app.add_middleware(
 # Configure Gemini API
 # Set your API key as environment variable: GEMINI_API_KEY
 load_dotenv()
-
 GEMINI_API_KEY = os.getenv("GEMINI_API")
 if not GEMINI_API_KEY:
     raise ValueError("Please set GEMINI_API_KEY environment variable")
@@ -77,6 +76,17 @@ def extract_confidence_from_text(text: str) -> float:
     # Default confidence if not found
     return 75.0
 
+def clean_text(text: str) -> str:
+    """Clean text by removing markdown formatting and extra characters"""
+    # Remove markdown formatting
+    text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)  # Remove **bold**
+    text = re.sub(r'\*([^*]+)\*', r'\1', text)      # Remove *italic*
+    text = re.sub(r'#+\s*', '', text)               # Remove headers
+    text = re.sub(r'[-•*]\s*', '', text)            # Remove bullet points
+    text = re.sub(r'\n+', ' ', text)                # Replace multiple newlines with space
+    text = re.sub(r'\s+', ' ', text)                # Replace multiple spaces with single space
+    return text.strip()
+
 def parse_gemini_response(response_text: str) -> dict:
     """Parse Gemini response and extract structured information"""
     try:
@@ -104,13 +114,17 @@ def parse_gemini_response(response_text: str) -> dict:
         if not line:
             continue
             
+        # Remove markdown formatting from line
+        clean_line = clean_text(line)
+        
         # Detect sections
-        line_lower = line.lower()
+        line_lower = clean_line.lower()
         if any(keyword in line_lower for keyword in ['disease', 'condition', 'diagnosis']):
             current_section = 'disease'
             # Extract disease name
-            if ':' in line:
-                result['disease'] = line.split(':', 1)[1].strip()
+            if ':' in clean_line:
+                disease_name = clean_line.split(':', 1)[1].strip()
+                result['disease'] = disease_name if disease_name else 'Unknown Skin Condition'
             continue
         elif any(keyword in line_lower for keyword in ['description', 'symptoms', 'characteristics']):
             current_section = 'description'
@@ -121,25 +135,37 @@ def parse_gemini_response(response_text: str) -> dict:
         
         # Add content to appropriate section
         if current_section == 'description':
-            description_lines.append(line)
+            if clean_line and not any(skip in clean_line.lower() for skip in ['disease', 'condition', 'diagnosis']):
+                description_lines.append(clean_line)
         elif current_section == 'treatments':
-            if line.startswith('-') or line.startswith('•') or line.startswith('*'):
-                treatment_lines.append(line[1:].strip())
-            elif line and not line.startswith(('Note:', 'Disclaimer:', 'Important:')):
-                treatment_lines.append(line)
-        elif current_section is None:
-            # If no section detected, add to description
-            description_lines.append(line)
+            if clean_line and not any(skip in clean_line.lower() for skip in ['treatment', 'recommendation', 'therapy', 'note:', 'disclaimer:', 'important:']):
+                treatment_lines.append(clean_line)
+        elif current_section is None and clean_line:
+            # If no section detected, try to categorize
+            if any(keyword in clean_line.lower() for keyword in ['symptom', 'appear', 'characteristic', 'present']):
+                description_lines.append(clean_line)
     
-    # Compile results
+    # Compile results with fallbacks
     if description_lines:
         result['description'] = ' '.join(description_lines)
+    else:
+        # Fallback description
+        result['description'] = f"A skin condition that requires medical evaluation. The image shows characteristics that suggest {result['disease'].lower()}."
+    
     if treatment_lines:
         result['treatments'] = treatment_lines
+    else:
+        # Fallback treatments based on common recommendations
+        result['treatments'] = [
+            "Consult a dermatologist for proper diagnosis",
+            "Keep the affected area clean and dry",
+            "Avoid scratching or irritating the area",
+            "Consider topical treatments as recommended by healthcare provider"
+        ]
     
-    # Fallback if no structured data found
-    if not result['description'] and not result['treatments']:
-        result['description'] = response_text[:500] + "..." if len(response_text) > 500 else response_text
+    # Ensure we have meaningful content
+    if result['description'] == '':
+        result['description'] = f"Visual analysis suggests {result['disease']}. Professional medical evaluation recommended for accurate diagnosis."
     
     return result
 
@@ -157,27 +183,39 @@ async def analyze_skin_image(request: ImageAnalysisRequest):
         prompt = """
         You are a medical AI assistant specializing in dermatology. Analyze this skin image and provide a detailed assessment.
 
-        Please provide your response in the following format:
+        MANDATORY: You MUST provide ALL the following sections in your response:
 
-        **Disease/Condition:** [Name of the skin condition]
+        Disease/Condition: [Specific name of the skin condition - be precise]
 
-        **Description:** [Detailed description of what you observe, including symptoms, appearance, and characteristics]
+        Description: [Provide a detailed description of what you observe, including visual characteristics, symptoms, and appearance. This section is REQUIRED and must be at least 2-3 sentences.]
 
-        **Recommended Treatments:**
-        - [Treatment option 1]
-        - [Treatment option 2]
-        - [Treatment option 3]
-        - [Additional recommendations]
+        Recommended Treatments:
+        [List 4-6 specific treatment recommendations. This section is REQUIRED. Include both immediate care and professional treatments.]
 
-        **Confidence Level:** [Your confidence percentage, e.g., "85% confident"]
+        Confidence Level: [Your confidence as a percentage, e.g., "85% confident"]
 
-        Important guidelines:
-        1. Be specific about the skin condition you detect
-        2. Provide confidence level as a percentage
-        3. Include both topical and systemic treatment options where appropriate
-        4. Mention when to see a healthcare provider
-        5. If you're uncertain, suggest differential diagnoses
-        6. Consider common skin conditions like eczema, psoriasis, dermatitis, acne, fungal infections, etc.
+        CRITICAL REQUIREMENTS:
+        1. ALWAYS provide a specific disease/condition name (not "unknown" or "unclear")
+        2. ALWAYS provide a detailed description (minimum 2-3 sentences)
+        3. ALWAYS provide at least 4 treatment recommendations
+        4. Use simple text format - NO markdown symbols like ** or * 
+        5. Be specific about the skin condition you detect
+        6. Include confidence level as a percentage
+        7. Consider common conditions: eczema, psoriasis, dermatitis, acne, fungal infections, rosacea, etc.
+
+        Format your response exactly like this (without markdown formatting):
+
+        Disease/Condition: [condition name]
+
+        Description: [detailed description here]
+
+        Recommended Treatments:
+        Consult a dermatologist for proper diagnosis
+        [treatment 2]
+        [treatment 3]
+        [treatment 4]
+
+        Confidence Level: [percentage] confident
 
         Remember: This is for educational purposes and should not replace professional medical consultation.
         """
