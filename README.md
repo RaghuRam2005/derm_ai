@@ -38,7 +38,7 @@ pip install -r requirements.txt
 In `app` folder create a file named `.env` and paste the gemini API key in the file
 
 ```
-GEMINI_API = "your api key"
+GEMINI_API = "your api key" # Paste your API key here
 ```
 
 ### 5. Running the Application
