@@ -16,15 +16,15 @@ st.set_page_config(
     layout="wide"
 )
 
-BASE_PATH = os.path.abspath(__file__)
-db_path = os.path.join(BASE_PATH, "..", "database", "skindisease.db")
+BASE_PATH = os.path.dirname(__file__)
+db_path = os.path.abspath(os.path.join(BASE_PATH, "..", "database", "db_path"))
 
 # Backend URL
 BACKEND_URL = "http://localhost:8000"
 
 # Database setup
 def init_db():
-    conn = sqlite3.connect('skin_app.db')
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
     
     # Users table
@@ -51,7 +51,7 @@ def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 def authenticate_user(username, password):
-    conn = sqlite3.connect('skin_app.db')
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
     c.execute("SELECT id, password_hash FROM users WHERE username = ?", (username,))
     result = c.fetchone()
@@ -63,7 +63,7 @@ def authenticate_user(username, password):
 
 def create_user(username, password):
     try:
-        conn = sqlite3.connect('skin_app.db')
+        conn = sqlite3.connect(db_path)
         c = conn.cursor()
         c.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)",
                  (username, hash_password(password)))
@@ -75,7 +75,7 @@ def create_user(username, password):
         return None
 
 def save_analysis(user_id, image_name, analysis_result, confidence):
-    conn = sqlite3.connect('skin_app.db')
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
     c.execute("""INSERT INTO analysis_history 
                  (user_id, image_name, analysis_result, confidence) 
@@ -85,7 +85,7 @@ def save_analysis(user_id, image_name, analysis_result, confidence):
     conn.close()
 
 def get_user_history(user_id):
-    conn = sqlite3.connect('skin_app.db')
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
     c.execute("""SELECT image_name, analysis_result, confidence, timestamp 
                  FROM analysis_history 
@@ -235,7 +235,7 @@ else:
         with col1:
             st.subheader("📸 Uploaded Image")
             image = Image.open(uploaded_file)
-            st.image(image, caption="Uploaded Image", use_column_width=True)
+            st.image(image, caption="Uploaded Image", use_container_width=True)
         
         with col2:
             st.subheader("🔍 Analysis")

@@ -14,3 +14,7 @@ env/
 .vscode/
 *.swp
 *.swo
+
+#others
+*skin_app.db
+*db_path
