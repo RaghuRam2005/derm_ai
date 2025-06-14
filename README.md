@@ -1,10 +1,10 @@
 # Skin Disease Detection System
 
-A complete AI-powered skin disease detection system using Streamlit frontend, FastAPI backend, and Google Gemini AI.
+A complete AI-powered skin disease detection system using Streamlit frontend, FastAPI backend, and Gemini.
 
 ## Features
 
-- 🔬 **AI-Powered Analysis**: Uses Google Gemini AI to analyze skin images
+- 🔬 **AI-Powered Analysis**: Uses Google Gemini to analyze skin images
 - 👤 **User Authentication**: Optional login system to save analysis history
 - 📊 **Analysis History**: View previous analyses and results
 - 🎯 **Confidence Scoring**: Get confidence levels for each diagnosis
@@ -26,24 +26,19 @@ A complete AI-powered skin disease detection system using Streamlit frontend, Fa
 
 ### 3. Installation
 
+Clone or download the project files and open terminal in the project folder
+
 ```bash
-# Clone or download the project files
 # Install dependencies
 pip install -r requirements.txt
 ```
 
 ### 4. Environment Setup
 
-Set your Gemini API key as an environment variable:
+In `app` folder create a file named `.env` and paste the gemini API key in the file
 
-**Windows:**
-```cmd
-set GEMINI_API_KEY=your_api_key_here
 ```
-
-**Linux/Mac:**
-```bash
-export GEMINI_API_KEY=your_api_key_here
+GEMINI_API = "your api key"
 ```
 
 ### 5. Running the Application
@@ -111,16 +106,6 @@ skin-disease-detection/
 
 ⚠️ **Medical Disclaimer**: This application is for educational and informational purposes only. Always consult with qualified healthcare professionals for proper medical diagnosis and treatment.
 
-### Privacy and Security
-- Passwords are hashed using SHA-256
-- Images are not permanently stored
-- Analysis history is linked to user accounts
-
-### Limitations
-- Requires internet connection for AI analysis
-- Analysis quality depends on image quality
-- Not a substitute for professional medical advice
-
 ## Troubleshooting
 
 ### Common Issues
@@ -136,44 +121,6 @@ skin-disease-detection/
 3. **Image Upload Issues**
    - Ensure image is in supported format (PNG, JPG, JPEG)
    - Check image file size (should be reasonable)
-
-4. **Database Issues**
-   - Delete `skin_app.db` to reset the database
-   - Ensure write permissions in the app directory
-
-## Customization
-
-### Adding New Features
-- Modify `app.py` for frontend changes
-- Update `main.py` for backend functionality
-- Add new dependencies to `requirements.txt`
-
-### Styling
-- Streamlit supports custom CSS
-- Modify the `st.set_page_config()` for page settings
-
-## Development
-
-### Running in Development Mode
-
-Backend with auto-reload:
-```bash
-uvicorn main:app --reload --port 8000
-```
-
-Frontend with auto-reload:
-```bash
-streamlit run app.py --server.runOnSave true
-```
-
-## Production Deployment
-
-For production deployment, consider:
-- Using environment variables for sensitive data
-- Setting up proper database (PostgreSQL, MySQL)
-- Using HTTPS for security
-- Implementing rate limiting
-- Adding logging and monitoring
 
 ## License
 
