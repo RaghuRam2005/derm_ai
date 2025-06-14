@@ -7,6 +7,7 @@ import io
 from datetime import datetime
 import sqlite3
 import hashlib
+import os
 
 # Configure page
 st.set_page_config(
@@ -15,12 +16,16 @@ st.set_page_config(
     layout="wide"
 )
 
+# Database Path
+BASE_PATH = os.path.dirname(__file__)
+DB_PATH = os.path.abspath(os.path.join(BASE_PATH, "..", "database", "skin_app.db"))
+
 # Backend URL
 BACKEND_URL = "http://localhost:8000"
 
 # Database setup
 def init_db():
-    conn = sqlite3.connect('skin_app.db')
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     
     # Users table
@@ -47,7 +52,7 @@ def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 def authenticate_user(username, password):
-    conn = sqlite3.connect('skin_app.db')
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT id, password_hash FROM users WHERE username = ?", (username,))
     result = c.fetchone()
@@ -59,7 +64,7 @@ def authenticate_user(username, password):
 
 def create_user(username, password):
     try:
-        conn = sqlite3.connect('skin_app.db')
+        conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         c.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)",
                  (username, hash_password(password)))
@@ -71,7 +76,7 @@ def create_user(username, password):
         return None
 
 def save_analysis(user_id, image_name, analysis_result, confidence):
-    conn = sqlite3.connect('skin_app.db')
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     
     # Use disease name as the display name
@@ -85,7 +90,7 @@ def save_analysis(user_id, image_name, analysis_result, confidence):
     conn.close()
 
 def get_user_history(user_id):
-    conn = sqlite3.connect('skin_app.db')
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("""SELECT image_name, analysis_result, confidence, timestamp 
                  FROM analysis_history 
