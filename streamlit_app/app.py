@@ -274,7 +274,7 @@ else:
                         
                         # Confidence score
                         confidence = result.get('confidence', 0)
-                        st.metric("Confidence Level", f"{confidence:.1f}%")
+                        st.metric("Confidence Level", f"{confidence*100:.1f}%")
                         
                         # Disease information
                         if 'disease' in result and result['disease']:

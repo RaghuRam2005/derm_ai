@@ -10,6 +10,7 @@ from typing import Optional
 import json
 import re
 from dotenv import load_dotenv
+from model.model import ModelHandler
 
 # Initialize FastAPI app
 app = FastAPI(title="Skin Disease Detection API", version="1.0.0")
@@ -34,6 +35,7 @@ genai.configure(api_key=GEMINI_API_KEY)
 
 # Initialize Gemini model
 model = genai.GenerativeModel('gemini-1.5-flash')
+image_model = ModelHandler()
 
 # Pydantic models
 class ImageAnalysisRequest(BaseModel):
@@ -45,7 +47,6 @@ class AnalysisResponse(BaseModel):
     description: str
     treatments: list
     confidence: float
-    disclaimer: str
 
 def base64_to_image(base64_str: str) -> Image.Image:
     """Convert base64 string to PIL Image"""
@@ -55,26 +56,6 @@ def base64_to_image(base64_str: str) -> Image.Image:
         return image
     except Exception as e:
         raise ValueError(f"Invalid image data: {str(e)}")
-
-def extract_confidence_from_text(text: str) -> float:
-    """Extract confidence percentage from text"""
-    # Look for patterns like "95%", "85% confident", etc.
-    confidence_patterns = [
-        r'(\d+)%\s*confident',
-        r'confidence[:\s]*(\d+)%',
-        r'(\d+)%\s*confidence',
-        r'probability[:\s]*(\d+)%',
-        r'(\d+)%\s*likely',
-        r'(\d+)%\s*chance'
-    ]
-    
-    for pattern in confidence_patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            return float(match.group(1))
-    
-    # Default confidence if not found
-    return 75.0
 
 def clean_text(text: str) -> str:
     """Clean text by removing markdown formatting and extra characters"""
@@ -87,86 +68,46 @@ def clean_text(text: str) -> str:
     text = re.sub(r'\s+', ' ', text)                # Replace multiple spaces with single space
     return text.strip()
 
-def parse_gemini_response(response_text: str) -> dict:
-    """Parse Gemini response and extract structured information"""
+def parse_gemini_response(response_text: str, disease_name: str) -> dict:
+    """Parse Gemini response and extract 'description' and 'treatment' from raw text."""
     try:
-        # Try to parse as JSON first
+        # If response is JSON formatted, parse it directly
         if response_text.strip().startswith('{'):
             return json.loads(response_text)
-    except:
+    except Exception:
         pass
+
+    response_text = clean_text(response_text)
     
-    # Parse text response
-    lines = response_text.split('\n')
     result = {
-        'disease': 'Unknown Skin Condition',
         'description': '',
-        'treatments': [],
-        'confidence': extract_confidence_from_text(response_text)
+        'treatment': []
     }
+
+    # Extract under headings
+    desc_match = re.search(r'Description of .*?:\s*(.*?)(?:Treatments for|$)', response_text, re.IGNORECASE | re.DOTALL)
+    treatment_match = re.search(r'Treatments for .*?:\s*(.*)', response_text, re.IGNORECASE | re.DOTALL)
+
+    if desc_match:
+        result['description'] = desc_match.group(1).strip()
+
+    if treatment_match:
+        # Split by newlines or periods if necessary, avoiding blank entries
+        raw_treatments = treatment_match.group(1).strip()
+        treatments = re.split(r'\n|(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?)\s', raw_treatments)
+        result['treatment'] = [t.strip() for t in treatments if t.strip()]
     
-    current_section = None
-    description_lines = []
-    treatment_lines = []
-    
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-            
-        # Remove markdown formatting from line
-        clean_line = clean_text(line)
-        
-        # Detect sections
-        line_lower = clean_line.lower()
-        if any(keyword in line_lower for keyword in ['disease', 'condition', 'diagnosis']):
-            current_section = 'disease'
-            # Extract disease name
-            if ':' in clean_line:
-                disease_name = clean_line.split(':', 1)[1].strip()
-                result['disease'] = disease_name if disease_name else 'Unknown Skin Condition'
-            continue
-        elif any(keyword in line_lower for keyword in ['description', 'symptoms', 'characteristics']):
-            current_section = 'description'
-            continue
-        elif any(keyword in line_lower for keyword in ['treatment', 'recommendation', 'therapy']):
-            current_section = 'treatments'
-            continue
-        
-        # Add content to appropriate section
-        if current_section == 'description':
-            if clean_line and not any(skip in clean_line.lower() for skip in ['disease', 'condition', 'diagnosis']):
-                description_lines.append(clean_line)
-        elif current_section == 'treatments':
-            if clean_line and not any(skip in clean_line.lower() for skip in ['treatment', 'recommendation', 'therapy', 'note:', 'disclaimer:', 'important:']):
-                treatment_lines.append(clean_line)
-        elif current_section is None and clean_line:
-            # If no section detected, try to categorize
-            if any(keyword in clean_line.lower() for keyword in ['symptom', 'appear', 'characteristic', 'present']):
-                description_lines.append(clean_line)
-    
-    # Compile results with fallbacks
-    if description_lines:
-        result['description'] = ' '.join(description_lines)
-    else:
-        # Fallback description
-        result['description'] = f"A skin condition that requires medical evaluation. The image shows characteristics that suggest {result['disease'].lower()}."
-    
-    if treatment_lines:
-        result['treatments'] = treatment_lines
-    else:
-        # Fallback treatments based on common recommendations
-        result['treatments'] = [
-            "Consult a dermatologist for proper diagnosis",
-            "Keep the affected area clean and dry",
-            "Avoid scratching or irritating the area",
-            "Consider topical treatments as recommended by healthcare provider"
+    # Fallbacks
+    if not result['description']:
+        result['description'] = f"Visual investigation suggests the condition is likely {disease_name}. Further description couldn't be determined."
+
+    if not result['treatment']:
+        result['treatment'] = [
+            "Consult a dermatologist for proper diagnosis.",
+            "Keep the affected area clean and dry.",
+            "Avoid scratching or irritating the affected area."
         ]
-    
-    # Ensure we have meaningful content
-    if result['description'] == '':
-        result['description'] = f"Visual analysis suggests {result['disease']}. Professional medical evaluation recommended for accurate diagnosis."
-    
+
     return result
 
 @app.get("/")
@@ -178,66 +119,26 @@ async def analyze_skin_image(request: ImageAnalysisRequest):
     try:
         # Convert base64 to image
         image = base64_to_image(request.image_data)
+        disease = image_model.predict(image)
         
         # Prepare detailed prompt for Gemini
-        prompt = """
-        You are a medical AI assistant specializing in dermatology. Analyze this skin image and provide a detailed assessment.
-
-        MANDATORY: You MUST provide ALL the following sections in your response:
-
-        Disease/Condition: [Specific name of the skin condition - be precise]
-
-        Description: [Provide a detailed description of what you observe, including visual characteristics, symptoms, and appearance. This section is REQUIRED and must be at least 2-3 sentences.]
-
-        Recommended Treatments:
-        [List 4-6 specific treatment recommendations. This section is REQUIRED. Include both immediate care and professional treatments.]
-
-        Confidence Level: [Your confidence as a percentage, e.g., "85% confident"]
-
-        CRITICAL REQUIREMENTS:
-        1. ALWAYS provide a specific disease/condition name (not "unknown" or "unclear")
-        2. ALWAYS provide a detailed description (minimum 2-3 sentences)
-        3. ALWAYS provide at least 4 treatment recommendations
-        4. Use simple text format - NO markdown symbols like ** or * 
-        5. Be specific about the skin condition you detect
-        6. Include confidence level as a percentage
-        7. Consider common conditions: eczema, psoriasis, dermatitis, acne, fungal infections, rosacea, etc.
-
-        Format your response exactly like this (without markdown formatting):
-
-        Disease/Condition: [condition name]
-
-        Description: [detailed description here]
-
-        Recommended Treatments:
-        Consult a dermatologist for proper diagnosis
-        [treatment 2]
-        [treatment 3]
-        [treatment 4]
-
-        Confidence Level: [percentage] confident
-
-        Remember: This is for educational purposes and should not replace professional medical consultation.
+        prompt = f"""
+        Description of {disease['class']} (generate it in a small paragraph):
+        Treatments for {disease['class']} (generate a points with no numbering, only a space between each point):
+        generate answer under these two headings, do not change or modify them
         """
         
         # Generate response using Gemini
-        response = model.generate_content([prompt, image])
+        response = model.generate_content([prompt])
         
         if not response.text:
             raise HTTPException(status_code=500, detail="No response from AI model")
         
         # Parse the response
-        parsed_result = parse_gemini_response(response.text)
-        
-        # Add disclaimer
-        parsed_result['disclaimer'] = "This AI analysis is for informational purposes only and should not replace professional medical advice."
-        
-        # Ensure confidence is within reasonable bounds
-        if parsed_result['confidence'] > 95:
-            parsed_result['confidence'] = 95.0
-        elif parsed_result['confidence'] < 50:
-            parsed_result['confidence'] = 65.0
-        
+        parsed_result = parse_gemini_response(response.text, disease['class'])
+        parsed_result['disease'] = disease['class']
+        parsed_result['confidence'] = disease['confidence']
+
         return parsed_result
         
     except ValueError as e:
