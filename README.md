@@ -1,10 +1,10 @@
 # Skin Disease Detection System
 
-A complete AI-powered skin disease detection system using Streamlit frontend, FastAPI backend, and Gemini.
+A complete AI-powered skin disease detection system using Streamlit frontend, FastAPI backend, and SQLITE database.
 
 ## Features
 
-- 🔬 **AI-Powered Analysis**: Uses Google Gemini to analyze skin images
+- 🔬 **AI-Powered Analysis**: Uses Deepseek model through openrouter API for disease analysis
 - 👤 **User Authentication**: Optional login system to save analysis history
 - 📊 **Analysis History**: View previous analyses and results
 - 🎯 **Confidence Scoring**: Get confidence levels for each diagnosis
@@ -16,15 +16,9 @@ A complete AI-powered skin disease detection system using Streamlit frontend, Fa
 ### 1. Prerequisites
 
 - Python 3.8 or higher
-- Google Gemini API key (free tier available)
+- openrouter (deepseek API key) and openrouter URL
 
-### 2. Get Google Gemini API Key
-
-1. Go to [Google AI Studio](https://makersuite.google.com/app/apikey)
-2. Create a new API key
-3. Copy the API key for later use
-
-### 3. Installation
+### 2. Installation
 
 Clone or download the project files and open terminal in the project folder (create a virtual environment (optional))
 
@@ -33,25 +27,35 @@ Clone or download the project files and open terminal in the project folder (cre
 pip install -r requirements.txt
 ```
 
-### 4. Environment Setup
+### 3. Environment Setup
 
-In `app` folder create a file named `.env` and paste the gemini API key in the file
+In `app` folder create a file named `.env` and paste the API key and URL as shown below
 
 ```
-GEMINI_API = "your api key" # Paste your API key here
+DEEPSEEK_API = your api key         # Paste your API here
+DEEPSEEK_URL = "https://openrouter.ai/api/v1/chat/completions"
 ```
+### 4. Database setup
 
-### 5. Running the Application
+create a folder named `database` for storing the password and analysis history.
+
+### 5. Model setup
+
+Download the model file from the link below and paste it in the `model` folder
+
+Model link: https://drive.google.com/file/d/1lXyJE5qvZcQHHweOI4sGUHu053GHAAwF/view?usp=sharing
+
+### 6. Running the Application
 
 **Terminal 1 - Start Backend:**
 ```bash
-python main.py
+python app/app.py
 ```
 This starts the FastAPI backend on `http://localhost:8000`
 
 **Terminal 2 - Start Frontend:**
 ```bash
-streamlit run app.py
+streamlit run ./streamlit_app/app.py
 ```
 This starts the Streamlit frontend on `http://localhost:8501`
 
@@ -59,11 +63,19 @@ This starts the Streamlit frontend on `http://localhost:8501`
 
 ```
 skin-disease-detection/
-├── app.py              # Streamlit frontend
-├── main.py             # FastAPI backend
+app/
+   ├── app.py           # FastAPI backend
+   ├── .env             # Environment File
+database/
+   ├── skin_app.db      # Database folder (create this after cloning the repo)
+model/
+   ├── model.py         # Local model for finding the disease name
+   ├── dinov2_model     # Pretrained model file (download this from link given below)
+streamlit_app/
+   ├── app.py           # Streamlit frontend
 ├── requirements.txt    # Python dependencies
-├── README.md          # This file
-└── skin_app.db        # SQLite database (created automatically)
+├── .gitignore          # Ignore files
+└── README.md          # This file
 ```
 
 ## Usage
@@ -75,33 +87,6 @@ skin-disease-detection/
 5. **Review Results**: Get disease detection, confidence score, and treatments
 6. **View History**: If logged in, check your previous analyses
 
-## API Endpoints
-
-- `GET /` - API status
-- `POST /analyze` - Analyze skin image
-- `GET /health` - Health check
-
-## Features in Detail
-
-### Frontend (Streamlit)
-- Clean, intuitive interface
-- Image upload and preview
-- User authentication system
-- Analysis history management
-- Responsive design
-
-### Backend (FastAPI)
-- RESTful API design
-- Google Gemini AI integration
-- Image processing and analysis
-- Structured response parsing
-- Error handling and validation
-
-### Database
-- SQLite for user data and history
-- Password hashing for security
-- Analysis history storage
-
 ## Important Notes
 
 ⚠️ **Medical Disclaimer**: This application is for educational and informational purposes only. Always consult with qualified healthcare professionals for proper medical diagnosis and treatment.
@@ -110,17 +95,36 @@ skin-disease-detection/
 
 ### Common Issues
 
-1. **Backend Connection Error**
+1. **Relative Import Error (backend)**
+   - If there if a Error message like this
+   ```
+   ImportError: attempted relative import with no known parent package
+   ```
+   - Then use run the python file as given below
+   ```
+   python -m app/app.py
+   ```
+   - If it doesn't work then use the commands given below and run it
+   For linux/Mac:
+   ```
+   export PYTHONPATH=$(pwd)
+   ```
+   For windows:
+   If using command prompt, use this
+   ```
+   set PYTHONPATH=%cd%
+   ```
+   If using powershell, use this
+   ```
+   $env:PYTHONPATH = (Get-Location).Path
+   ```
+   - Then run the python file 
+   ```
+   python app/app.py
+   ```
+3. **Backend Connection Error**
    - Ensure backend is running on port 8000
-   - Check if GEMINI_API_KEY is set correctly
-
-2. **API Key Issues**
-   - Verify your Gemini API key is valid
-   - Check if you have API quota remaining
-
-3. **Image Upload Issues**
-   - Ensure image is in supported format (PNG, JPG, JPEG)
-   - Check image file size (should be reasonable)
+   - Check if DEEPSEEK_API is set correctly
 
 ## License
 
