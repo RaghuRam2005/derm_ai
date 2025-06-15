@@ -1,8 +1,4 @@
-Here's your **updated README.md** with the improved **Troubleshooting** section:
 
----
-
-````markdown
 # Skin Disease Detection System
 
 A complete AI-powered skin disease detection system using Streamlit frontend, FastAPI backend, and SQLITE database.
@@ -150,4 +146,3 @@ python app/app.py
 
 This project is for educational purposes. Ensure compliance with medical software regulations in your jurisdiction.
 
-```
