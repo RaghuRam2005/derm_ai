@@ -94,37 +94,33 @@ streamlit_app/
 ## Troubleshooting
 
 ### Common Issues
-
-1. **Relative Import Error (backend)**
-   - If there if a Error message like this
-   ```
-   ImportError: attempted relative import with no known parent package
-   ```
-   - Then use run the python file as given below
-   ```
-   python -m app/app.py
-   ```
-   - If it doesn't work then use the commands given below and run it
-   For linux/Mac:
-   ```
-   export PYTHONPATH=$(pwd)
-   ```
-   For windows:
-   If using command prompt, use this
-   ```
-   set PYTHONPATH=%cd%
-   ```
-   If using powershell, use this
-   ```
-   $env:PYTHONPATH = (Get-Location).Path
-   ```
-   - Then run the python file 
-   ```
-   python app/app.py
-   ```
-3. **Backend Connection Error**
-   - Ensure backend is running on port 8000
-   - Check if DEEPSEEK_API is set correctly
+**Relative Import Error (backend)**
+If there if a **Error message** like this while starting the backend FAST API server.
+```
+ImportError: attempted relative import with no known parent package
+```
+Then run the python file as given below.
+```
+python -m app/app.py
+```
+If it doesn't work and shows the same error message, then use the commands given below.
+**For linux/Mac:**
+```
+export PYTHONPATH=$(pwd)
+```
+**For windows:**
+If using **command prompt**, use this
+```
+set PYTHONPATH=%cd%
+```
+If using **powershell**, use this
+```
+$env:PYTHONPATH = (Get-Location).Path
+```
+Then finally, run the python file 
+```
+python app/app.py
+```
 
 ## License
 
